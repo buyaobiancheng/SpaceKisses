@@ -86,50 +86,62 @@
     </footer>
 
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, addDoc, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-auth.js";
+        import { getFirestore, addDoc, collection } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
 
-        // Global variables provided by the environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // 【关键修复 1】手动硬编码 Firebase 配置
+        // 您的 Firebase 项目配置信息
+        const FIREBASE_CONFIG = {
+            apiKey: "AIzaSyCTdORA5WDB8FCgFGh9Sly1CRirFhQlP0E",
+            authDomain: "spacekisses-bc8df.firebaseapp.com",
+            projectId: "spacekisses-bc8df",
+            storageBucket: "spacekisses-bc8df.firebasestorage.app",
+            messagingSenderId: "815021637918",
+            appId: "1:815021637918:web:5168dd81dbe63326edc90f",
+            measurementId: "G-3C3B8CB2QF"
+        };
 
-        let db, auth;
+        // 【关键修复 2】定义 App ID
+        const appId = FIREBASE_CONFIG.projectId || 'star-drawing-app-default';
+
+        let db;
         let userId = null;
+        let isFirebaseReady = false;
 
         // --- Firebase Initialization and Authentication ---
         async function initializeFirebase() {
             try {
-                const app = initializeApp(firebaseConfig);
+                // 使用手动定义的配置初始化 Firebase
+                const app = initializeApp(FIREBASE_CONFIG);
                 db = getFirestore(app);
-                auth = getAuth(app);
+                const auth = getAuth(app);
 
-                // Authenticate user
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
+                // 统一使用匿名登录，确保所有用户都有 userId
+                await signInAnonymously(auth);
 
-                // Wait for auth state change
+                // 监听认证状态变化，确保获取到 userId
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
+                        isFirebaseReady = true;
                         console.log("Firebase initialized. User ID:", userId);
-                    } else {
-                        console.log("Firebase initialized. User is anonymous.");
-                        // Fallback user ID if anonymous sign-in failed or is not ready
-                        userId = crypto.randomUUID();
-                    }
 
-                    // 【FIX】认证成功后，启用按钮并恢复文本
-                    document.getElementById('uploadBtn').disabled = false;
-                    document.getElementById('uploadBtn').textContent = '上传画作';
+                        // 【修复 3】认证成功后，启用按钮
+                        document.getElementById('uploadBtn').disabled = false;
+                        document.getElementById('uploadBtn').textContent = '上传画作';
+                        document.getElementById('uploadBtn').classList.remove('bg-red-600');
+                    } else {
+                        // 如果匿名登录失败，则使用随机 ID (但 Firestore 操作将失败)
+                        console.error("Firebase Auth failed. Using fallback ID.");
+                        userId = crypto.randomUUID();
+                        document.getElementById('uploadBtn').textContent = '认证失败';
+                        document.getElementById('uploadBtn').classList.add('bg-red-600');
+                    }
                 });
             } catch (error) {
                 console.error("Firebase initialization failed:", error);
-                document.getElementById('uploadBtn').textContent = '连接失败';
+                document.getElementById('uploadBtn').textContent = '连接失败 (请检查配置)';
                 document.getElementById('uploadBtn').classList.add('bg-red-600');
             }
         }
@@ -153,8 +165,6 @@
             // 历史记录数组，用于撤销功能
             const history = [];
             const MAX_HISTORY = 10;
-
-            // (Canvas resize, setupContext, saveState, restoreState, updateUndoButtonState, draw, startDrawing, stopDrawing functions remain the same)
 
             // --- Canvas 初始化与响应式设置 ---
 
@@ -286,8 +296,8 @@
 
             // 【更新】上传功能 - 使用 Firestore
             uploadBtn.addEventListener('click', async () => {
-                // 这个检查仍然保留，以防在认证过程中用户点击按钮
-                if (!db || !userId) {
+                // 使用 isFirebaseReady 标记进行更严格的检查
+                if (!isFirebaseReady || !db || !userId) {
                     showMessage('数据库未准备好，认证进行中，请稍候再试。', 'error');
                     return;
                 }
@@ -366,5 +376,7 @@
 
     </script>
 
+</body>
+</html>
 </body>
 </html>
