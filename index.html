@@ -75,10 +75,11 @@
                 撤销
             </button>
 
-            <!-- 上传按钮 - 主操作按钮，更亮眼的蓝色和发光阴影 -->
+            <!-- 上传按钮 - 主操作按钮，初始禁用并提示加载中 -->
             <button id="uploadBtn"
-                    class="px-8 py-2 bg-blue-500 text-white font-bold rounded-full shadow-xl shadow-blue-500/50 hover:bg-blue-400 transition duration-150 active:scale-95">
-                上传画作
+                    class="px-8 py-2 bg-blue-500 text-white font-bold rounded-full shadow-xl shadow-blue-500/50 hover:bg-blue-400 transition duration-150 active:scale-95 disabled:opacity-40"
+                    disabled>
+                正在连接...
             </button>
         </div>
 
@@ -121,9 +122,15 @@
                         // Fallback user ID if anonymous sign-in failed or is not ready
                         userId = crypto.randomUUID();
                     }
+
+                    // 【FIX】认证成功后，启用按钮并恢复文本
+                    document.getElementById('uploadBtn').disabled = false;
+                    document.getElementById('uploadBtn').textContent = '上传画作';
                 });
             } catch (error) {
                 console.error("Firebase initialization failed:", error);
+                document.getElementById('uploadBtn').textContent = '连接失败';
+                document.getElementById('uploadBtn').classList.add('bg-red-600');
             }
         }
 
@@ -279,8 +286,9 @@
 
             // 【更新】上传功能 - 使用 Firestore
             uploadBtn.addEventListener('click', async () => {
+                // 这个检查仍然保留，以防在认证过程中用户点击按钮
                 if (!db || !userId) {
-                    showMessage('数据库未准备好，请稍候再试。', 'error');
+                    showMessage('数据库未准备好，认证进行中，请稍候再试。', 'error');
                     return;
                 }
 
