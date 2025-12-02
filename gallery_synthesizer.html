@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>星空画作合成器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117; /* 深黑蓝色背景 */
+            min-height: 100vh;
+        }
+        /* 主画布容器，用于展示合成结果 */
+        #composite-container {
+            border: 2px solid #30363d;
+            box-shadow: 0 0 30px rgba(56, 139, 253, 0.2); /* 蓝色发光效果 */
+        }
+        /* 隐藏原始的画布，只在合成时使用 */
+        #compositeCanvas {
+            display: none;
+        }
+    </style>
+</head>
+<body class="p-6">
+
+    <header class="max-w-7xl mx-auto mb-8">
+        <h1 class="text-3xl font-extrabold text-blue-400 mb-1">
+            ✨ 星空画作合成器
+        </h1>
+        <p class="text-gray-400 text-sm">
+            从 Firebase 实时加载画作并进行合成。
+        </p>
+    </header>
+
+    <main class="max-w-7xl mx-auto">
+
+        <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4 mb-6">
+
+            <button id="synthesizeBtn"
+                    class="px-8 py-3 bg-blue-500 text-white font-bold rounded-lg shadow-xl hover:bg-blue-400 transition duration-150 active:scale-95 disabled:opacity-40"
+                    disabled>
+                加载中...
+            </button>
+
+            <button id="downloadBtn"
+                    class="px-8 py-3 bg-green-600 text-white font-bold rounded-lg shadow-xl hover:bg-green-500 transition duration-150 active:scale-95 disabled:opacity-40"
+                    disabled>
+                下载合成图 (PNG)
+            </button>
+
+        </div>
+
+        <p id="message-area" class="text-xl text-blue-300 font-medium my-10">
+            正在连接 Firebase 并加载画作数据...
+        </p>
+
+        <div id="composite-container" class="w-full aspect-square bg-black rounded-xl overflow-hidden relative">
+            <img id="preview-image" alt="合成星空预览" class="w-full h-full object-contain">
+        </div>
+
+        <canvas id="compositeCanvas"></canvas>
+
+    </main>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, query } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+
+        // 【您的 Firebase 配置】必须与 index.html 和 admin_dashboard.html 中的配置保持一致
+        const FIREBASE_CONFIG = {
+            apiKey: "AIzaSyCTdORA5WDB8FCgFGh9Sly1CRirFhQlP0E",
+            authDomain: "spacekisses-bc8df.firebaseapp.com",
+            projectId: "spacekisses-bc8df",
+            storageBucket: "spacekisses-bc8df.firebasestorage.app",
+            messagingSenderId: "815021637918",
+            appId: "1:815021637918:web:5168dd81dbe63326edc90f",
+            measurementId: "G-3C3B8CB2QF"
+        };
+
+        const appId = FIREBASE_CONFIG.projectId || 'star-drawing-app-default';
+        const collectionPath = `artifacts/${appId}/public/data/star_drawings`;
+
+        const messageArea = document.getElementById('message-area');
+        const synthesizeBtn = document.getElementById('synthesizeBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const previewImage = document.getElementById('preview-image');
+
+        // 用于合成的画布
+        const canvas = document.getElementById('compositeCanvas');
+        const ctx = canvas.getContext('2d');
+        const COMPOSITE_SIZE = 2048; // 设置一个固定的高分辨率合成尺寸
+
+        let db;
+        let drawingsData = []; // 存储加载到的所有画作 Base64 数据
+
+        // --- Firebase 初始化 ---
+        async function initializeFirebase() {
+            try {
+                const app = initializeApp(FIREBASE_CONFIG);
+                db = getFirestore(app);
+                const auth = getAuth(app);
+
+                await signInAnonymously(auth);
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        console.log("Synthesizer: Authenticated. Starting listener.");
+                        startListeningForDrawings();
+                    } else {
+                        console.error("Synthesizer: Authentication failed.");
+                        messageArea.textContent = '错误：用户认证失败，无法读取数据。';
+                    }
+                });
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                messageArea.textContent = '错误：数据库连接失败。请检查配置和网络。';
+            }
+        }
+
+        // --- 实时数据监听 ---
+        function startListeningForDrawings() {
+            const drawingsQuery = query(collection(db, collectionPath));
+
+            onSnapshot(drawingsQuery, (snapshot) => {
+                drawingsData = []; // 清空旧数据
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    // 只收集 Base64 数据
+                    if (data.drawingData) {
+                        drawingsData.push(data.drawingData);
+                    }
+                });
+
+                if (drawingsData.length === 0) {
+                    messageArea.textContent = '目前还没有任何画作数据可供合成。';
+                    synthesizeBtn.disabled = true;
+                    synthesizeBtn.textContent = '无画作数据';
+                    downloadBtn.disabled = true;
+                } else {
+                    messageArea.textContent = `已加载 ${drawingsData.length} 张画作。点击“开始合成”按钮。`;
+                    synthesizeBtn.disabled = false;
+                    synthesizeBtn.textContent = `开始合成 (${drawingsData.length} 张)`;
+                    downloadBtn.disabled = true; // 每次加载新数据后，需要重新合成
+
+                    // 自动执行一次合成
+                    synthesize();
+                }
+            }, (error) => {
+                console.error("Firestore real-time listener failed:", error);
+                messageArea.textContent = `实时监听失败：${error.message}`;
+            });
+        }
+
+        // --- 核心合成逻辑 ---
+        async function synthesize() {
+            if (drawingsData.length === 0) return;
+
+            synthesizeBtn.disabled = true;
+            synthesizeBtn.textContent = '合成中...';
+            downloadBtn.disabled = true;
+            messageArea.textContent = `正在合成 ${drawingsData.length} 张画作，请稍候...`;
+
+            // 设置画布尺寸
+            canvas.width = COMPOSITE_SIZE;
+            canvas.height = COMPOSITE_SIZE;
+
+            // 1. 绘制背景 (纯黑)
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, COMPOSITE_SIZE, COMPOSITE_SIZE);
+
+            // 2. 启用柔和的全局发光效果 (可选，模拟星云)
+            // ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
+            // ctx.shadowBlur = 5;
+
+            // 3. 异步加载并绘制所有画作
+            for (let i = 0; i < drawingsData.length; i++) {
+                const dataUrl = drawingsData[i];
+                await drawSingleImage(dataUrl);
+                // 实时更新进度
+                messageArea.textContent = `合成进度: ${i + 1} / ${drawingsData.length} 张`;
+            }
+
+            // 4. 清除全局发光 (如果设置了)
+            // ctx.shadowBlur = 0;
+
+            // 5. 将合成结果显示在预览区
+            previewImage.src = canvas.toDataURL('image/png');
+
+            synthesizeBtn.disabled = false;
+            synthesizeBtn.textContent = `重新合成 (${drawingsData.length} 张)`;
+            downloadBtn.disabled = false;
+            messageArea.textContent = '合成完成！';
+        }
+
+        /**
+         * 异步加载并绘制单张图片到主画布上
+         * @param {string} dataUrl Base64 编码的 PNG 图片数据
+         */
+        function drawSingleImage(dataUrl) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    // --- 随机排布逻辑 ---
+
+                    // 随机位置 (限制在画布区域内)
+                    const x = Math.random() * COMPOSITE_SIZE;
+                    const y = Math.random() * COMPOSITE_SIZE;
+
+                    // 随机缩放 (例如：0.4到1.2倍)
+                    const scale = 0.4 + Math.random() * 0.8;
+                    const scaledWidth = img.width * scale;
+                    const scaledHeight = img.height * scale;
+
+                    // 随机旋转 (-45度到 +45度)
+                    const rotation = (Math.random() - 0.5) * Math.PI / 2;
+
+                    // 保存当前画布状态
+                    ctx.save();
+
+                    // 移动到中心点进行旋转和缩放
+                    ctx.translate(x, y);
+                    ctx.rotate(rotation);
+
+                    // 设置绘制时的局部发光效果
+                    // 这里的发光效果来自画作本身，但可以调整其强度
+                    ctx.shadowColor = 'rgba(255, 255, 255, 0.7)';
+                    ctx.shadowBlur = Math.random() * 15 + 5; // 随机发光强度
+
+                    // 绘制图片 (位置在中心点，因此要偏移)
+                    ctx.drawImage(img,
+                        -scaledWidth / 2, // 居中偏移 X
+                        -scaledHeight / 2, // 居中偏移 Y
+                        scaledWidth,
+                        scaledHeight
+                    );
+
+                    // 恢复之前的画布状态 (清除 translate 和 rotate)
+                    ctx.restore();
+
+                    resolve();
+                };
+                img.onerror = () => {
+                    console.warn("Error loading image from data URL:", dataUrl.substring(0, 50) + "...");
+                    resolve(); // 即使加载失败也要继续下一个
+                };
+                img.src = dataUrl;
+            });
+        }
+
+        // --- 下载功能 ---
+        function downloadComposite() {
+            const dataURL = canvas.toDataURL('image/png');
+            const a = document.createElement('a');
+            a.href = dataURL;
+            a.download = `StarKisses_Composite_${Date.now()}.png`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        // --- 事件监听器 ---
+        synthesizeBtn.addEventListener('click', synthesize);
+        downloadBtn.addEventListener('click', downloadComposite);
+
+        // 页面加载完成后开始初始化 Firebase
+        window.onload = initializeFirebase;
+    </script>
+
+</body>
+</html>
