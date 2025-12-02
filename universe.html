@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>蔚蓝深空 - 聚散重生版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Inter', sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+
+        /* UI 覆盖层 */
+        #ui-layer {
+            position: absolute;
+            z-index: 10;
+            pointer-events: none;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 2rem;
+            box-sizing: border-box;
+            background: radial-gradient(circle at center, transparent 0%, rgba(0,5,20,0.4) 80%, #000205 100%);
+        }
+
+        .glass-panel {
+            background: rgba(0, 30, 60, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(100, 220, 255, 0.15);
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            pointer-events: auto;
+            transition: all 0.3s ease;
+            box-shadow: 0 0 15px rgba(0, 150, 255, 0.1);
+        }
+
+        .glass-panel:hover {
+            border-color: rgba(100, 220, 255, 0.4);
+            background: rgba(0, 40, 80, 0.5);
+            box-shadow: 0 0 25px rgba(0, 150, 255, 0.3);
+        }
+
+        #loader {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 20;
+            text-align: center;
+            transition: opacity 1s ease;
+        }
+    </style>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="loader">
+        <div class="text-4xl font-bold text-blue-400 mb-4 tracking-widest animate-pulse">正在进入深蓝梦境...</div>
+        <div class="text-sm text-blue-600 font-mono">加载星光数据 / 启动宇宙重生场</div>
+    </div>
+
+    <div id="ui-layer">
+        <footer class="flex justify-center">
+            <div class="text-blue-500/50 text-xs tracking-widest">
+                左键旋转 • 滚轮缩放 • 右键平移
+            </div>
+        </footer>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+        // Firebase Imports
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, query } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+
+        // --- Firebase Config ---
+        const FIREBASE_CONFIG = {
+            apiKey: "AIzaSyCTdORA5WDB8FCgFGh9Sly1CRirFhQlP0E",
+            authDomain: "spacekisses-bc8df.firebaseapp.com",
+            projectId: "spacekisses-bc8df",
+            storageBucket: "spacekisses-bc8df.firebasestorage.app",
+            messagingSenderId: "815021637918",
+            appId: "1:815021637918:web:5168dd81dbe63326edc90f",
+            measurementId: "G-3C3B8CB2QF"
+        };
+        const projectId = FIREBASE_CONFIG.projectId;
+
+        // --- Scene Setup ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x00020a, 0.0008);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 5000);
+        camera.position.set(0, 30, 250);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.2;
+        controls.maxDistance = 1500;
+
+        // --- Post Processing (Blue Bloom) ---
+        const renderScene = new RenderPass(scene, camera);
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        bloomPass.strength = 2.0;
+        bloomPass.radius = 0.7;
+        bloomPass.threshold = 0.02;
+
+        const composer = new EffectComposer(renderer);
+        composer.addPass(renderScene);
+        composer.addPass(bloomPass);
+
+        // --- Helpers: Textures ---
+        function createSoftTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            const g = ctx.createRadialGradient(32,32,0,32,32,32);
+            g.addColorStop(0, 'rgba(255,255,255,1)');
+            g.addColorStop(0.3, 'rgba(200,240,255,0.6)');
+            g.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0,0,64,64);
+            return new THREE.Texture(canvas);
+        }
+        const softTexture = createSoftTexture();
+        softTexture.needsUpdate = true;
+
+        // --- Planetary Dissipation System (Modified for Full Cycle) ---
+        class DissipationSystem {
+            constructor(parentGroup, radius, color, count = 500) {
+                this.parent = parentGroup;
+                this.radius = radius;
+                this.particles = [];
+
+                const geo = new THREE.BufferGeometry();
+                const pos = new Float32Array(count * 3);
+                const sizes = new Float32Array(count);
+
+                for(let i=0; i<count; i++) {
+                    this.resetParticle(i, pos, sizes);
+                }
+
+                geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+                const mat = new THREE.PointsMaterial({
+                    color: color,
+                    map: softTexture,
+                    transparent: true,
+                    opacity: 1.0,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false,
+                    vertexColors: false
+                });
+
+                mat.onBeforeCompile = (shader) => {
+                    shader.vertexShader = shader.vertexShader.replace(
+                        'gl_PointSize = size;',
+                        'gl_PointSize = size;\n varying float vOpacity;\n vOpacity = size / 5.0;'
+                    );
+                    shader.fragmentShader = 'varying float vOpacity;\n' + shader.fragmentShader;
+                    shader.fragmentShader = shader.fragmentShader.replace(
+                        '#include <map_particle_fragment>',
+                        '#include <map_particle_fragment>\n diffuseColor.a *= vOpacity;'
+                    );
+                };
+
+                this.system = new THREE.Points(geo, mat);
+                parentGroup.add(this.system);
+
+                this.posAttr = geo.attributes.position;
+                this.sizeAttr = geo.attributes.size;
+            }
+
+            resetParticle(index, posArray, sizeArray) {
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                const r = this.radius * (0.1 + Math.random() * 0.2);
+
+                const x = r * Math.sin(phi) * Math.cos(theta);
+                const y = r * Math.sin(phi) * Math.sin(theta);
+                const z = r * Math.cos(phi);
+
+                posArray[index * 3] = x;
+                posArray[index * 3 + 1] = y;
+                posArray[index * 3 + 2] = z;
+
+                sizeArray[index] = 2.0 + Math.random() * 3.0;
+
+                this.particles[index] = {
+                    velocity: new THREE.Vector3(x, y, z).normalize().multiplyScalar(0.1 + Math.random()*0.2),
+                    life: 1.0
+                };
+            }
+
+            update(time) {
+                const posArray = this.posAttr.array;
+                const sizeArray = this.sizeAttr.array;
+
+                const cycleTimeFactor = 0.2;
+                const globalCycle = Math.sin(time * cycleTimeFactor) * 0.5 + 0.5;
+
+                // 控制整体透明度：聚拢状态接近 1，消散状态接近 0.1
+                this.system.material.opacity = 0.1 + globalCycle * 0.9;
+
+                const isDissipatingPhase = globalCycle > 0.5;
+
+                // Dissipation Speed
+                const dissipationSpeed = isDissipatingPhase ? 0.35 : 0.01;
+
+                for(let i = 0; i < this.particles.length; i++) {
+                    const p = this.particles[i];
+                    p.life -= 0.005;
+
+                    if (globalCycle < 0.1 || p.life <= 0) {
+                         // 在聚拢阶段或粒子生命结束，强制重置到核心
+                        this.resetParticle(i, posArray, sizeArray);
+                        p.life = 1.0;
+                    } else if (isDissipatingPhase) {
+                        // 消散阶段：粒子加速向外
+                        const currentPos = new THREE.Vector3(posArray[i*3], posArray[i*3+1], posArray[i*3+2]);
+                        const dir = currentPos.clone().normalize();
+                        p.velocity.copy(dir).multiplyScalar(dissipationSpeed);
+
+                        posArray[i*3] += p.velocity.x;
+                        posArray[i*3+1] += p.velocity.y;
+                        posArray[i*3+2] += p.velocity.z;
+
+                        sizeArray[i] = p.life * 5.0 * (1 + globalCycle * 0.5);
+                    }
+                }
+                this.posAttr.needsUpdate = true;
+                this.sizeAttr.needsUpdate = true;
+            }
+        }
+
+
+        // --- 1. Background Stars ---
+        function createBlueStars() {
+            const geometry = new THREE.BufferGeometry();
+            const count = 5000;
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+            const palette = [ new THREE.Color(0x00ffff), new THREE.Color(0x0055ff), new THREE.Color(0xffffff), new THREE.Color(0x88ccff) ];
+            for(let i=0; i<count; i++) {
+                const r = 1500 * Math.cbrt(Math.random());
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                positions[i*3] = r * Math.sin(phi) * Math.cos(theta);
+                positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+                positions[i*3+2] = r * Math.cos(phi);
+                const col = palette[Math.floor(Math.random()*palette.length)];
+                colors[i*3] = col.r; colors[i*3+1] = col.g; colors[i*3+2] = col.b;
+            }
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            const mat = new THREE.PointsMaterial({
+                size: 1.5, vertexColors: true, map: softTexture, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false
+            });
+            const stars = new THREE.Points(geometry, mat);
+            scene.add(stars);
+            return stars;
+        }
+
+        // --- 2. Blue Saturn & Dissipation ---
+        let saturnDissipation;
+        function createBlueSaturn() {
+            const group = new THREE.Group();
+            group.position.set(-150, 0, -100);
+            group.rotation.z = Math.PI / 5;
+            const bodyGeo = new THREE.SphereGeometry(35, 64, 64);
+            const bodyMat = new THREE.PointsMaterial({ color: 0x0044ff, size: 0.6, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending });
+            const body = new THREE.Points(bodyGeo, bodyMat);
+            group.add(body);
+            const ringGeo = new THREE.BufferGeometry();
+            const positions = []; const colors = [];
+            for(let i=0; i<25000; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = 45 + Math.random() * 65;
+                const x = Math.cos(angle) * r;
+                const z = Math.sin(angle) * r;
+                positions.push(x, (Math.random()-0.5)*1.5, z);
+                const normalizedR = (r - 45) / 65;
+                const col = new THREE.Color().lerpColors(new THREE.Color(0xaaddff), new THREE.Color(0x000033), normalizedR);
+                colors.push(col.r, col.g, col.b);
+            }
+            ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            ringGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            const ringMat = new THREE.PointsMaterial({ size: 0.5, vertexColors: true, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending });
+            group.add(new THREE.Points(ringGeo, ringMat));
+            saturnDissipation = new DissipationSystem(group, 35, 0x0088ff, 800);
+            scene.add(group);
+            return group;
+        }
+
+        // --- 3. Phantom Giant & Dissipation ---
+        let giantDissipation;
+        function createPhantomGiant() {
+            const group = new THREE.Group();
+            group.position.set(100, 50, -200);
+            const count = 6000; const geo = new THREE.BufferGeometry(); const pos = []; const col = [];
+            for(let i=0; i<count; i++) {
+                const r = 50; const theta = Math.random()*Math.PI*2; const phi = Math.acos(2*Math.random()-1);
+                const finalR = r + Math.sin(theta * 8 + phi*4) * 3;
+                pos.push(finalR*Math.sin(phi)*Math.cos(theta), finalR*Math.sin(phi)*Math.sin(theta), finalR*Math.cos(phi));
+                const c = new THREE.Color();
+                if(Math.abs(Math.cos(phi*6)) > 0.4) c.setHex(0x3300cc); else c.setHex(0x0066ff);
+                col.push(c.r, c.g, c.b);
+            }
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+            const mat = new THREE.PointsMaterial({ size: 1.5, vertexColors: true, blending: THREE.AdditiveBlending, map: softTexture, transparent:true, opacity:0.7 });
+            group.add(new THREE.Points(geo, mat));
+            giantDissipation = new DissipationSystem(group, 52, 0x5500ff, 500);
+            scene.add(group);
+            return group;
+        }
+
+        // --- 4. Deep Blue Orb & Dissipation ---
+        let deepBlueOrbDissipation;
+        function createDeepBlueOrb() {
+            const group = new THREE.Group();
+            group.position.set(250, -100, 0);
+            const geo = new THREE.SphereGeometry(20, 32, 32);
+            const mat = new THREE.PointsMaterial({ color: 0x000044, size: 0.5, blending: THREE.AdditiveBlending });
+            group.add(new THREE.Points(geo, mat));
+            deepBlueOrbDissipation = new DissipationSystem(group, 20, 0x0033cc, 300);
+            scene.add(group);
+            return group;
+        }
+
+        // --- 5. Minor Ringed Planet & Dissipation ---
+        let minorRingedDissipation;
+        function createMinorRingedPlanet() {
+            const group = new THREE.Group();
+            group.position.set(-200, 150, 150);
+            const bodyGeo = new THREE.SphereGeometry(15, 32, 32);
+            const bodyMat = new THREE.PointsMaterial({ color: 0x1e3a8a, size: 0.4, blending: THREE.AdditiveBlending });
+            group.add(new THREE.Points(bodyGeo, bodyMat));
+            const ringGeo = new THREE.RingGeometry(18, 22, 64);
+            ringGeo.rotateX(Math.PI / 2);
+            const ringMat = new THREE.PointsMaterial({ color: 0x3b82f6, size: 0.3, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending });
+            group.add(new THREE.Points(ringGeo, ringMat));
+            minorRingedDissipation = new DissipationSystem(group, 15, 0x60a5fa, 250);
+            scene.add(group);
+            return group;
+        }
+
+        // --- 6. Satellite (Unchanged) ---
+        function createBlueSatellite() {
+            const group = new THREE.Group();
+            group.position.set(0, 250, 0);
+            const body = new THREE.Points(new THREE.BoxGeometry(6,6,6), new THREE.PointsMaterial({color: 0x88ccff, size: 0.5}));
+            group.add(body);
+            const wingGeo = new THREE.PlaneGeometry(22, 6, 12, 4);
+            const wingMat = new THREE.PointsMaterial({color: 0x0077ff, size: 0.3});
+            const wing = new THREE.Points(wingGeo, wingMat); wing.position.set(14,0,0); group.add(wing);
+            const wing2 = wing.clone(); wing2.position.set(-14,0,0); group.add(wing2);
+            scene.add(group);
+            return group;
+        }
+
+        // --- 7. Flowing Dream Mist (Unchanged) ---
+        function createDreamMist() {
+            const count = 10000;
+            const geo = new THREE.BufferGeometry();
+            const pos = new Float32Array(count * 3);
+            const sizes = new Float32Array(count);
+            const speedData = [];
+            for(let i=0; i<count; i++) {
+                pos[i*3] = (Math.random()-0.5) * 2500;
+                pos[i*3+1] = (Math.random()-0.5) * 600;
+                pos[i*3+2] = (Math.random()-0.5) * 1500;
+                sizes[i] = 10 + Math.random() * 20;
+                speedData.push({ x: 1.0 + Math.random() * 1.0, yOffset: Math.random() * Math.PI * 2 });
+            }
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+            const mat = new THREE.PointsMaterial({ color: 0x003388, map: softTexture, size: 20, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false });
+            const system = new THREE.Points(geo, mat);
+            system.userData = { speeds: speedData };
+            scene.add(system);
+            return system;
+        }
+
+        // --- 8. Streamline Particles (Unchanged) ---
+        let streamlineParticles;
+        function createStreamlineParticles() {
+            const count = 2000;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+            const speeds = new Float32Array(count);
+            const offsets = new Float32Array(count);
+            for (let i = 0; i < count; i++) {
+                positions[i*3] = (Math.random() - 0.5) * 1000;
+                positions[i*3+1] = (Math.random() - 0.5) * 1000;
+                positions[i*3+2] = (Math.random() - 0.5) * 1000;
+                speeds[i] = 0.5 + Math.random() * 1.5;
+                offsets[i] = Math.random() * Math.PI * 2;
+            }
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('speed', new THREE.BufferAttribute(speeds, 1));
+            geometry.setAttribute('offset', new THREE.BufferAttribute(offsets, 1));
+            const material = new THREE.PointsMaterial({ color: 0x00aaff, map: softTexture, size: 5, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false });
+            streamlineParticles = new THREE.Points(geometry, material);
+            scene.add(streamlineParticles);
+        }
+
+        // --- 9. Shooting Stars (Unchanged) ---
+        class ShootingStarSystem {
+            constructor() {
+                this.stars = [];
+                this.geometry = new THREE.BufferGeometry();
+                this.material = new THREE.LineBasicMaterial({ color: 0xbbeeff, opacity: 0.7, transparent: true, blending: THREE.AdditiveBlending });
+                this.line = new THREE.LineSegments(this.geometry, this.material);
+                scene.add(this.line);
+                this.nextSpawnTime = 0;
+            }
+            update(time) {
+                if (time > this.nextSpawnTime) { this.spawn(); this.nextSpawnTime = time + 1 + Math.random() * 2; }
+                const positions = [];
+                for(let i = this.stars.length - 1; i >= 0; i--) {
+                    const s = this.stars[i]; s.life -= 0.015;
+                    s.start.add(s.velocity);
+                    const tailPos = s.start.clone().sub(s.velocity.clone().multiplyScalar(s.length));
+                    if(s.life <= 0) this.stars.splice(i, 1);
+                    else { positions.push(s.start.x, s.start.y, s.start.z); positions.push(tailPos.x, tailPos.y, tailPos.z); }
+                }
+                this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            }
+            spawn() {
+                const start = new THREE.Vector3((Math.random()-0.5)*1200, 500, (Math.random()-0.5)*1200);
+                const velocity = new THREE.Vector3((Math.random()-0.5)*4, -4 - Math.random()*4, (Math.random()-0.5)*4);
+                this.stars.push({ start, velocity, life: 1.0, length: 20 + Math.random()*20 });
+            }
+        }
+
+
+        // --- Firebase User Content (Unchanged) ---
+        const userStarsGroup = new THREE.Group();
+        scene.add(userStarsGroup);
+        const createdDrawingIds = new Set();
+        async function initFirebase() {
+            try {
+                const app = initializeApp(FIREBASE_CONFIG);
+                const db = getFirestore(app);
+                const auth = getAuth(app);
+                await signInAnonymously(auth);
+                const q = query(collection(db, `artifacts/${projectId}/public/data/star_drawings`));
+                onSnapshot(q, (snapshot) => {
+                    // document.getElementById('star-count').textContent = snapshot.size; // Star count removed
+                    if(!snapshot.empty) document.getElementById('loader').style.opacity = '0';
+                    snapshot.forEach(doc => {
+                        if (createdDrawingIds.has(doc.id)) return;
+                        const data = doc.data();
+                        if (data.drawingData) addUserStar(data.drawingData);
+                        createdDrawingIds.add(doc.id);
+                    });
+                });
+            } catch (e) { console.error(e); }
+        }
+        function addUserStar(base64) {
+            const img = new Image(); img.src = base64;
+            img.onload = () => {
+                const tex = new THREE.Texture(img); tex.needsUpdate = true;
+                const mat = new THREE.SpriteMaterial({ map: tex, color: 0xddeeff, blending: THREE.AdditiveBlending, transparent: true });
+                const sprite = new THREE.Sprite(mat);
+                const r = 150 + Math.random()*400;
+                const theta = Math.random()*Math.PI*2; const phi = Math.acos(2*Math.random()-1);
+                sprite.position.set(r*Math.sin(phi)*Math.cos(theta), r*Math.sin(phi)*Math.sin(theta), r*Math.cos(phi));
+                const size = 8 + Math.random()*12; sprite.scale.set(size, size, 1);
+                sprite.userData = { offset: Math.random()*100, baseScale: size };
+                userStarsGroup.add(sprite);
+            };
+        }
+
+        // --- Animation Loop ---
+        createBlueStars();
+        const saturn = createBlueSaturn();
+        const giant = createPhantomGiant();
+        const deepBlueOrb = createDeepBlueOrb();
+        const minorRinged = createMinorRingedPlanet();
+        const satellite = createBlueSatellite();
+        const dreamMist = createDreamMist();
+        const shooter = new ShootingStarSystem();
+        createStreamlineParticles();
+
+        initFirebase();
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+            controls.update();
+
+            // Planets Rotation
+            if(saturn) saturn.rotation.y += 0.002;
+            if(giant) giant.rotation.y += 0.0015;
+            if(deepBlueOrb) deepBlueOrb.rotation.y -= 0.005;
+            if(minorRinged) minorRinged.rotation.y += 0.01;
+
+            // Update Dissipation Systems (Total Dissipation/Aggregation)
+            if(saturnDissipation) saturnDissipation.update(time);
+            if(giantDissipation) giantDissipation.update(time);
+            if(deepBlueOrbDissipation) deepBlueOrbDissipation.update(time);
+            if(minorRingedDissipation) minorRingedDissipation.update(time);
+
+            // Satellite Orbit
+            if(satellite) {
+                satellite.position.x = Math.cos(time * 0.1) * 350;
+                satellite.position.z = Math.sin(time * 0.1) * 350;
+                satellite.rotation.y += 0.01; satellite.lookAt(0,0,0);
+            }
+
+            // Update Dream Mist
+            if(dreamMist) {
+                const pos = dreamMist.geometry.attributes.position.array;
+                const speeds = dreamMist.userData.speeds;
+                for(let i=0; i<pos.length/3; i++) {
+                    pos[i*3] += speeds[i].x * 0.1;
+                    pos[i*3+1] += Math.sin(time + speeds[i].yOffset) * 0.4;
+                    if(pos[i*3] > 1250) pos[i*3] = -1250;
+                }
+                dreamMist.geometry.attributes.position.needsUpdate = true;
+            }
+
+            // Update Streamline Particles
+            if (streamlineParticles) {
+                const positions = streamlineParticles.geometry.attributes.position.array;
+                const speeds = streamlineParticles.geometry.attributes.speed.array;
+                const offsets = streamlineParticles.geometry.attributes.offset.array;
+                const flowSpeed = time * 0.05;
+
+                for (let i = 0; i < positions.length / 3; i++) {
+                    positions[i*3] = Math.sin(flowSpeed * speeds[i] + offsets[i]) * 500;
+                    positions[i*3+1] = Math.cos(flowSpeed * speeds[i] * 0.8 + offsets[i]) * 300;
+                    positions[i*3+2] = Math.sin(flowSpeed * speeds[i] * 1.2 + offsets[i]) * 400 - (flowSpeed * 10 % 800) + 400;
+
+                    if (positions[i*3+2] > 400) {
+                         positions[i*3+2] -= 800;
+                    }
+                }
+                streamlineParticles.geometry.attributes.position.needsUpdate = true;
+                streamlineParticles.rotation.y += 0.0005;
+                streamlineParticles.rotation.x += 0.0002;
+            }
+
+            shooter.update(time);
+
+            userStarsGroup.children.forEach(s => {
+                const scale = Math.sin(time * 1.5 + s.userData.offset) * 0.25 + 1;
+                s.scale.set(s.userData.baseScale * scale, s.userData.baseScale * scale, 1);
+            });
+
+            composer.render();
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth/window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+
+    </script>
+</body>
+</html>
