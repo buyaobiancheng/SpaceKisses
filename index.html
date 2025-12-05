@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>星空绘图板</title>
-    <!-- 引入 Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* 使用 Inter 字体并设置全局黑色背景 */
@@ -42,40 +41,26 @@
 </head>
 <body class="flex flex-col h-screen antialiased">
 
-    <!-- 顶栏标题 - 使用极深蓝黑色背景 -->
     <header class="p-4 bg-[#060A1A] shadow-2xl shadow-blue-900/50 text-center">
         <h1 class="text-2xl font-extrabold text-blue-300 tracking-wider">
             绘制您的专属星光
         </h1>
     </header>
 
-    <!-- 主体区域：画布容器 - 保持纯黑背景 -->
     <main id="canvas-container" class="flex-grow bg-black overflow-hidden relative">
         <canvas id="starCanvas" class="block w-full h-full"></canvas>
     </main>
 
-    <!-- 控制面板 - 使用极深蓝黑色背景和蓝色上边框 -->
     <footer class="bg-[#060A1A] p-4 border-t border-blue-900/50 flex flex-col sm:flex-row justify-between items-center space-y-3 sm:space-y-0 sm:space-x-6">
 
-        <!-- 画笔大小控制 -->
-        <div class="flex items-center space-x-3 w-full sm:w-1/3">
+        <div class="flex items-center space-x-3 w-full sm:w-1/2">
             <span class="text-sm font-medium text-blue-200 whitespace-nowrap">画笔大小:</span>
             <input type="range" id="brushSize" min="2" max="30" value="10"
                    class="w-full h-2 bg-blue-900 rounded-lg appearance-none cursor-pointer">
             <span id="sizeValue" class="text-sm font-mono text-blue-300 w-8 text-right">10</span>
         </div>
 
-        <!-- 操作按钮 -->
         <div class="flex space-x-4 w-full sm:w-auto justify-center">
-
-            <!-- 撤销按钮 - 蓝色主题下的二级操作 -->
-            <button id="undoBtn"
-                    class="px-5 py-2 bg-blue-700 text-white font-semibold rounded-full shadow-lg hover:bg-blue-600 transition duration-150 active:scale-95 disabled:opacity-40 disabled:hover:bg-blue-700"
-                    disabled>
-                撤销
-            </button>
-
-            <!-- 上传按钮 - 主操作按钮，初始禁用并提示加载中 -->
             <button id="uploadBtn"
                     class="px-8 py-2 bg-blue-500 text-white font-bold rounded-full shadow-xl shadow-blue-500/50 hover:bg-blue-400 transition duration-150 active:scale-95 disabled:opacity-40"
                     disabled>
@@ -90,8 +75,7 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-auth.js";
         import { getFirestore, addDoc, collection } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
 
-        // 【关键修复 1】手动硬编码 Firebase 配置
-        // 您的 Firebase 项目配置信息
+        // 【Firebase 配置】手动硬编码配置
         const FIREBASE_CONFIG = {
             apiKey: "AIzaSyCTdORA5WDB8FCgFGh9Sly1CRirFhQlP0E",
             authDomain: "spacekisses-bc8df.firebaseapp.com",
@@ -102,7 +86,6 @@
             measurementId: "G-3C3B8CB2QF"
         };
 
-        // 【关键修复 2】定义 App ID
         const appId = FIREBASE_CONFIG.projectId || 'star-drawing-app-default';
 
         let db;
@@ -112,27 +95,23 @@
         // --- Firebase Initialization and Authentication ---
         async function initializeFirebase() {
             try {
-                // 使用手动定义的配置初始化 Firebase
                 const app = initializeApp(FIREBASE_CONFIG);
                 db = getFirestore(app);
                 const auth = getAuth(app);
 
-                // 统一使用匿名登录，确保所有用户都有 userId
                 await signInAnonymously(auth);
 
-                // 监听认证状态变化，确保获取到 userId
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
                         isFirebaseReady = true;
                         console.log("Firebase initialized. User ID:", userId);
 
-                        // 【修复 3】认证成功后，启用按钮
+                        // 认证成功后，启用按钮
                         document.getElementById('uploadBtn').disabled = false;
                         document.getElementById('uploadBtn').textContent = '上传画作';
                         document.getElementById('uploadBtn').classList.remove('bg-red-600');
                     } else {
-                        // 如果匿名登录失败，则使用随机 ID (但 Firestore 操作将失败)
                         console.error("Firebase Auth failed. Using fallback ID.");
                         userId = crypto.randomUUID();
                         document.getElementById('uploadBtn').textContent = '认证失败';
@@ -154,7 +133,6 @@
             const ctx = canvas.getContext('2d');
             const brushSizeInput = document.getElementById('brushSize');
             const sizeValueSpan = document.getElementById('sizeValue');
-            const undoBtn = document.getElementById('undoBtn');
             const uploadBtn = document.getElementById('uploadBtn');
 
             let isDrawing = false;
@@ -162,22 +140,20 @@
             let lastY = 0;
             let currentBrushSize = parseInt(brushSizeInput.value);
 
-            // 历史记录数组，用于撤销功能
-            const history = [];
-            const MAX_HISTORY = 10;
-
             // --- Canvas 初始化与响应式设置 ---
 
             function resizeCanvas() {
                 canvas.width = canvas.offsetWidth;
                 canvas.height = canvas.offsetHeight;
                 setupContext();
+                // 确保清空画布
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
 
-                if (history.length > 0) {
-                    restoreState(history.length - 1);
-                } else {
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                }
+            // 【新增】清空画布函数
+            function clearCanvas() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                setupContext(); // 重设上下文配置
             }
 
             function setupContext() {
@@ -190,32 +166,9 @@
             }
 
             window.addEventListener('resize', resizeCanvas);
-            resizeCanvas();
+            resizeCanvas(); // 初始设置画布大小和样式
 
-            function saveState() {
-                if (history.length >= MAX_HISTORY) {
-                    history.shift();
-                }
-                history.push(canvas.toDataURL());
-                updateUndoButtonState();
-            }
-
-            function restoreState(index) {
-                if (index < 0 || index >= history.length) return;
-
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                const img = new Image();
-                img.onload = () => {
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    setupContext();
-                };
-                img.src = history[index];
-            }
-
-            function updateUndoButtonState() {
-                undoBtn.disabled = history.length <= 1;
-            }
+            // 【简化】移除 saveState, restoreState, updateUndoButtonState 函数
 
             function draw(e) {
                 if (!isDrawing) return;
@@ -241,7 +194,6 @@
 
             function startDrawing(e) {
                 isDrawing = true;
-                if (history.length === 0) { saveState(); }
 
                 let startX, startY;
                 if (e.touches && e.touches.length > 0) {
@@ -260,7 +212,7 @@
             function stopDrawing() {
                 if (isDrawing) {
                     isDrawing = false;
-                    saveState();
+                    // 【简化】移除 saveState 调用
                 }
             }
 
@@ -286,17 +238,15 @@
                 setupContext();
             });
 
-            undoBtn.addEventListener('click', () => {
-                if (history.length > 1) {
-                    history.pop();
-                    restoreState(history.length - 1);
-                    updateUndoButtonState();
-                }
-            });
-
-            // 【更新】上传功能 - 使用 Firestore
+            // 【更新】上传功能 - 上传后自动重置画布
             uploadBtn.addEventListener('click', async () => {
-                // 使用 isFirebaseReady 标记进行更严格的检查
+                // 检查画布是否为空（通过检查像素数据，简单实现）
+                const isCanvasEmpty = !ctx.getImageData(0, 0, canvas.width, canvas.height).data.some(channel => channel > 0);
+                if (isCanvasEmpty) {
+                     showMessage('画板为空，请先绘制您的星光。', 'error');
+                     return;
+                }
+
                 if (!isFirebaseReady || !db || !userId) {
                     showMessage('数据库未准备好，认证进行中，请稍候再试。', 'error');
                     return;
@@ -326,7 +276,6 @@
 
                     try {
                         // 4. 上传到 Firestore 公共集合
-                        // 集合路径: /artifacts/{appId}/public/data/star_drawings
                         const collectionPath = `artifacts/${appId}/public/data/star_drawings`;
                         await addDoc(collection(db, collectionPath), {
                             drawingData: transparentPNG, // Base64 Data URL
@@ -334,7 +283,10 @@
                             timestamp: Date.now()
                         });
 
-                        showMessage('上传成功！管理员网站上可以查看。', 'success');
+                        // 【关键修改】上传成功后清空画布
+                        clearCanvas();
+                        showMessage('上传成功！画板已清空，请绘制下一幅作品。', 'success');
+
                     } catch (error) {
                         console.error('上传到 Firestore 失败:', error);
                         showMessage('上传失败：数据库写入错误。', 'error');
@@ -369,14 +321,9 @@
                     messageBox.addEventListener('transitionend', () => messageBox.remove());
                 }, 3000);
             }
-
-            // 初始保存一个空白状态
-            saveState();
         };
 
     </script>
 
-</body>
-</html>
 </body>
 </html>
